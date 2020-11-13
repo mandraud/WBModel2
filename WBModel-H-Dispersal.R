@@ -83,6 +83,10 @@ WBModel <- function( MaxIterations    = 1,
   DayOutPopMat  <- matrix(0, ncol = MaxIterations, nrow = MaxDays)
   DayOutAniMat  <- matrix(0, ncol = MaxIterations, nrow = MaxDays)
   
+  RasterCoords<-WBMat
+  coords<-as.matrix(WBMat[,c('Lon','Lat')])
+  Distance<-as.matrix(dist(coords))
+  
   NewInfGroups  <- matrix(numeric(0), ncol = 3)
   NewInfAnimals <- matrix(numeric(0), ncol = 3)
   NewInfCarcass <- matrix(numeric(0), ncol = 3)
