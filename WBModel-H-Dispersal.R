@@ -102,8 +102,7 @@ WBModel <- function( MaxIterations    = 1,
   for(Iter in 1:MaxIterations){
     
     set.seed(Iter)
-    ## Initialize the population matrix
-    PopMatWB <- matrix(0, ncol = 16, nrow = 50000)
+
     ## Add the habitat capacity
     WBMat[WBMat[ ,5] == 1, 15] <- ceiling(rpert(sum(WBMat[ ,5] == 1), MinBCap, ModeBCap, MaxBCap))
 
@@ -111,7 +110,8 @@ WBModel <- function( MaxIterations    = 1,
                     
     homePixelsAll   <- sample(WBMat[TMPHP, 1], InitialOccCells)
   
-    InitSizeMat <- matrix(0, ncol = 16)
+    PopMatWB=NULL
+    size=0
     
     for(i in 1:InitialOccCells){
       
@@ -132,8 +132,8 @@ WBModel <- function( MaxIterations    = 1,
       Age           <- c(sample(2:10, size = sum(females, males), T, prob = AgeProbab)*365, tmpAgeSubA[Dam[(females + males + 1):(females + males + subAdults)]],
                          tmpAgePig[Dam[(females + males + subAdults + 1):(females + males + subAdults + Piglets)]])
       # Adjust the Dam number to fit the actual ID of the DAMs 
-      Dam[(females + males + 1):(females + males + subAdults)] <- Dam[(females + males + 1):(females + males + subAdults)] + (dim(InitSizeMat)[1]) - 1 # -1 because we have extra row at start
-      Dam[(females + males + subAdults + 1):(females + males + subAdults + Piglets)] <- Dam[(females + males + subAdults + 1):(females + males + subAdults + Piglets)] + (dim(InitSizeMat)[1]) - 1
+      Dam[(females + males + 1):(females + males + subAdults)] <- Dam[(females + males + 1):(females + males + subAdults)] + size# -1 because we have extra row at start
+      Dam[(females + males + subAdults + 1):(females + males + subAdults + Piglets)] <- Dam[(females + males + subAdults + 1):(females + males + subAdults + Piglets)] + size
       Breed         <- rep(0, sum(females, males, subAdults, Piglets))
       HomePixel     <- rep(homePixelsAll[i], sum(females, males, subAdults, Piglets))
       CurrPixel     <- HomePixel
@@ -144,17 +144,16 @@ WBModel <- function( MaxIterations    = 1,
       TimeToInfect  <- rep(0, sum(females, males, subAdults, Piglets))
       TimeToDeath   <- rep(0, sum(females, males, subAdults, Piglets))
       GroupMove     <- rep(0, sum(females, males, subAdults, Piglets))
-      IDs           <- (max(InitSizeMat[ ,1]) + 1):(max(InitSizeMat[ ,1]) + sum(females, males, subAdults, Piglets))
+      IDs           <- (size+ 1):(size + sum(females, males, subAdults, Piglets))
       
       InitMatWBPop  <- cbind(IDs, GroupID, Sex, AgeCat, Age, Breed, HomePixel, CurrPixel, infectStatus, SplitStatus, Dam, SplitMale, TimeDeath, TimeToInfect, TimeToDeath, GroupMove)
-      InitSizeMat   <- rbind(InitSizeMat, InitMatWBPop)
-      WBMat[unique(HomePixel), 15] <- females
+      PopMatWB   <- rbind(PopMatWB,InitMatWBPop)
+      # WBMat[unique(HomePixel), 15] <- females
+      size=nrow(PopMatWB)
       
     }
     
-    InitSizeMat <- InitSizeMat[-1, ] # This is just to remove the first line that includes zeros, necessary for initialization to keep track of IDs.
-    PopMatWB[1:dim(InitSizeMat)[1], ] <- InitSizeMat
-    
+
     GroupsToSplit        <- matrix(numeric(0),ncol=4)  
     
     colnames(PopMatWB) <- c("IDs", "Group_ID", "Sex", "Age_Cat", "Age_days", "Breed",
@@ -179,12 +178,7 @@ WBModel <- function( MaxIterations    = 1,
       
    #if(gTime <= TimeSeedInf) Criteria <- TRUE else Criteria <- any(PopMatWB[ ,9] %in% c(1:4))
       
-      MatSizeExp <- sum(PopMatWB[ ,1] == 0)
-      if(MatSizeExp < 1000){
-        ExtraRows <- matrix(rep(0, 15000), ncol = 16)
-        PopMatWB <- rbind(PopMatWB, ExtraRows)
-        
-      } 
+
 
       gTime <- gTime + 1
       
@@ -301,7 +295,7 @@ WBModel <- function( MaxIterations    = 1,
         GroupsMoveNumSD <- GroupsMoveNumSD[GroupsMoveNumSD[ ,2] == 1, , drop = FALSE]
         
         ## Keep track of the groups that have moved due to hunting
-        PopMatWB[PopMatWB[ ,2] %in% GroupsMoveNumSD[ ,1], 16] <- 1
+        PopMatWB[PopMatWB[ ,2] %in% GroupsMoveNumSD[ ,1], 16] <- 2
         
         ## Make Short distance happened
         if(dim(GroupsMoveNumSD)[1] > 0){
@@ -373,8 +367,7 @@ WBModel <- function( MaxIterations    = 1,
       ## Include death toll in the cumulative deaths (not infected)
       
       if(length(ToDieAll) > 0){
-        PopMatWB[ToDieAll, ] <- 0
-        PopMatWB        <- PopMatWB[order(PopMatWB[ ,2], PopMatWB[ ,3], PopMatWB[ ,5], decreasing = T), ]
+        PopMatWB<-PopMatWB[-ToDieAll, ]
         cumDeathPar <- cumDeathPar + length(ToDieAll)
       }
       
@@ -398,27 +391,25 @@ WBModel <- function( MaxIterations    = 1,
         DelIndex        <- DelIndex[NumOfSpring > 0]
         NumOfSpring     <- NumOfSpring[NumOfSpring > 0]
         if(length(NumOfSpring) > 0){
-          IDNew              <- (max(PopMatWB[ ,1]) + 1):(max(PopMatWB[ ,1]) + sum(NumOfSpring))
-          IndexLocation      <- (sum(PopMatWB[ ,1] > 0) + 1):(sum(PopMatWB[ ,1] > 0) + length(IDNew))
-          PopMatWB[IndexLocation, 1]  <- IDNew
-          PopMatWB[IndexLocation, 2]  <- rep(PopMatWB[DelIndex,2],NumOfSpring)
-          PopMatWB[IndexLocation, 3]  <- rbinom(sum(NumOfSpring),1,0.5)
-          PopMatWB[IndexLocation, 4]  <- 1
-          PopMatWB[IndexLocation, 5]  <- 1
-          PopMatWB[IndexLocation, 6]  <- 0
-          PopMatWB[IndexLocation, 7]  <- rep(PopMatWB[DelIndex,7],NumOfSpring)
-          PopMatWB[IndexLocation, 8]  <- rep(PopMatWB[DelIndex,7],NumOfSpring)
-          # Remember to make infection status dependent on Dam's infection status
-          PopMatWB[IndexLocation, 9]  <- 0
-          PopMatWB[IndexLocation, 10] <- 0
-          PopMatWB[IndexLocation, 11] <- rep(PopMatWB[DelIndex,1],NumOfSpring)
-          PopMatWB[IndexLocation, 12] <- 0
-          PopMatWB[IndexLocation, 13] <- 0
-          PopMatWB[IndexLocation, 14] <- 0
-          PopMatWB[IndexLocation, 15] <- 0
-          PopMatWB[IndexLocation, 16] <- 0
-          
-          PopMatWB        <- PopMatWB[order(PopMatWB[,2],PopMatWB[,3],PopMatWB[,5],decreasing=T),]
+          newBorns<-cbind((max(PopMatWB[ ,1]) + 1):(max(PopMatWB[ ,1]) + sum(NumOfSpring)),
+                          rep(PopMatWB[DelIndex,2],NumOfSpring),
+                          rbinom(sum(NumOfSpring),1,0.5),
+                          1,
+                          1,
+                          0,
+                          rep(PopMatWB[DelIndex,7],NumOfSpring),
+                          rep(PopMatWB[DelIndex,7],NumOfSpring),
+                          0,
+                          0,
+                          rep(PopMatWB[DelIndex,1],NumOfSpring),
+                          0,
+                          0,
+                          0,
+                          0,
+                          0)
+          colnames(newBorns)=colnames(PopMatWB)
+          PopMatWB <- rbind(PopMatWB,newBorns)         
+          PopMatWB <- PopMatWB[order(PopMatWB[,2],PopMatWB[,3],PopMatWB[,5],decreasing=T),]
           
         }
       }
