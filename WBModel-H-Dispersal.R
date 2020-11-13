@@ -1,11 +1,11 @@
 ##########################################################################################################
 ####################                        WB Model + Group Dispersal caused by hunting           ##################
 
-
 #Input data and WBModel adapted to France - 9km sq
 #Change the probability of movement by hunting manually
 
-setwd("//splffiler/ueqac/Luis/Model")
+source("Initialization.R")
+source("AnimalProcesses.R")
 library(dplyr)
 #library(doParallel)
 
@@ -45,6 +45,9 @@ WBModel <- function( MaxIterations    = 1,
                      SubAPropGroup    = mean(c(33.4,34.3,22.8,24.1)), # Proportion of sub-adults within a group Merta et al. (2015)
                      PigletPropGroup  = mean(c(42.7,38.6,58.7,53.4)), # Proportion of piglets within a group Merta et al. (2015)
                      
+                     ### Distance threshold for dispersion in meters
+                     DistThreshold=9000,
+                     
                      ### ASF related parameters
                      WGProbInf        = 1 - (1 - 0.05)^(1/7),         # Direct contact Lange et al. (2015EFSA) and Lange and Thulke (2017)
                      CarcProbInf      = 1 - (1 - 0.2) ^(1/7),         # Carcass Lange et al. (2015EFSA) and Lange and Thulke (2017)
@@ -68,29 +71,27 @@ WBModel <- function( MaxIterations    = 1,
                      DirectionList    =  list(c(6, 7, 8), c(8, 10, 13), c(11, 12, 13), c(6, 9, 11)), ## North, ## East, ## South, and ## West
                      
                      HabitatProb      = c(0.75, 0.20, 0.05),         # The probability to select a new pixel while male walking (we model that they prefer to walk in a habitat cell - Hab Cat c(1,2,3)
-                     FileWildBoarMat = "Inputs/EA_9km/Input_EA9.csv",
+                     FileWildBoarMat = "./EA_9km/Input_EA9.csv",
                      runID            = paste0("WB_MovH", ProbMovHunt*100, "_Groups_", InitialOccCells, "NI")
 ){
   
-  WBMat <- read.table(FileWildBoarMat, sep = ",", header = T)
-  WBMat <- cbind(WBMat, 0)
-  WBMat <- WBMat[ ,-1]
-  colnames(WBMat) <- c("ID", "Lon", "Lat", "Forest_cover", "Habitat", "Nb1", "Nb2",
-                       "Nb3", "Nb4", "Nb5", "Nb6", "Nb7", "Nb8", "Colors", "Breeding")
   
-  
-  DayOutInfMat  <- matrix(0, ncol = MaxIterations, nrow = MaxDays)
-  DayOutPopMat  <- matrix(0, ncol = MaxIterations, nrow = MaxDays)
-  DayOutAniMat  <- matrix(0, ncol = MaxIterations, nrow = MaxDays)
-  
-  RasterCoords<-WBMat
+
+# Raster and Distance Definition ------------------------------------------
+  WBMat<-defineWbMat(FileWildBoarMat)
   coords<-as.matrix(WBMat[,c('Lon','Lat')])
   Distance<-as.matrix(dist(coords))
   
+  
+
+# Initialize model outcomes.  ---------------------------------------------
+
+  DayOutInfMat  <- matrix(0, ncol = MaxIterations, nrow = MaxDays)
+  DayOutPopMat  <- matrix(0, ncol = MaxIterations, nrow = MaxDays)
+  DayOutAniMat  <- matrix(0, ncol = MaxIterations, nrow = MaxDays)
   NewInfGroups  <- matrix(numeric(0), ncol = 3)
   NewInfAnimals <- matrix(numeric(0), ncol = 3)
   NewInfCarcass <- matrix(numeric(0), ncol = 3)
-  
   EpDuration           <- rep(0, MaxIterations)
   FreqRelapse          <- rep(0, MaxIterations)
   cumDeath             <- rep(0, MaxIterations)
@@ -99,67 +100,34 @@ WBModel <- function( MaxIterations    = 1,
   Fcarcount            <- matrix(0, MaxDays, nrow(WBMat))
   Fimmunecount         <- matrix(0, MaxDays, nrow(WBMat))
   
+
+#  Initialize Mortality probabilities -------------------------------------
+  ### Mortality probabilities 
+  #ProbMortFact deleted and hunting probability added
+  ProbMortAdF  <- 1 - (SurvivalProbAdF)^(1/365)
+  ProbMortAdM  <- 1 - (SurvivalProbAdM)^(1/365)
+  ProbMortSAdF <- 1 - (SurvivalProbSAdF)^(1/365)
+  ProbMortSAdM <- 1 - (SurvivalProbSAdM)^(1/365)
+  ProbMortPigF <- 1 - (SurvivalProbPigF)^(1/365)
+  ProbMortPigM <- 1 - (SurvivalProbPigM)^(1/365)
+  ProbHunted   <- 1 - (1 - ProbHarvest)^(1/HuntingSeason)
+  ProbHuntedAM <- 1 - (1 - ProbHarvestAM)^(1/HuntingSeason)  
+  
+
+# Start Iterations  -------------------------------------------------------
+
   for(Iter in 1:MaxIterations){
     
     set.seed(Iter)
 
     ## Add the habitat capacity
-    WBMat[WBMat[ ,5] == 1, 15] <- ceiling(rpert(sum(WBMat[ ,5] == 1), MinBCap, ModeBCap, MaxBCap))
-
-    TMPHP <- WBMat[ ,5] == 1
-                    
-    homePixelsAll   <- sample(WBMat[TMPHP, 1], InitialOccCells)
-  
-    PopMatWB=NULL
-    size=0
-    
-    for(i in 1:InitialOccCells){
-      
-      ## The initial distribution of the groups was based on Merta et al. (2015). They were calculated relative to the average
-      ## Female percentage. for instance males were average % males divided by average % females. 
-      females       <- round(runif(1, 3, 6))
-      males         <- round(females*MalPropGroup/FemPropGroup)
-      subAdults     <- round(females*SubAPropGroup/FemPropGroup)
-      Piglets       <- round(females*PigletPropGroup/FemPropGroup)
-      GroupID       <- rep(i, sum(females, males, subAdults, Piglets))
-      Sex           <- c(rep(1, females), rep(0, males), rbinom(subAdults, 1, prob = 0.5), rbinom(Piglets, 1, prob = 0.5))
-      AgeCat        <- c(rep(3, females),rep(3, males), rep(2, subAdults), rep(1, Piglets))
-      Dam           <- c(rep(0, sum(females, males)), sample(1:females, subAdults, rep = T), sample(1:females, Piglets, rep = T))
-      # Females deliver between Jan and June, so the age of the piglets will be between 183 and 365 days.
-      # The same thing for sub-adults but with 365 days extra.
-      tmpAgeSubA    <- sample((183:365) + 365, females, rep = T)
-      tmpAgePig     <- sample((183:365), females, rep = T)
-      Age           <- c(sample(2:10, size = sum(females, males), T, prob = AgeProbab)*365, tmpAgeSubA[Dam[(females + males + 1):(females + males + subAdults)]],
-                         tmpAgePig[Dam[(females + males + subAdults + 1):(females + males + subAdults + Piglets)]])
-      # Adjust the Dam number to fit the actual ID of the DAMs 
-      Dam[(females + males + 1):(females + males + subAdults)] <- Dam[(females + males + 1):(females + males + subAdults)] + size# -1 because we have extra row at start
-      Dam[(females + males + subAdults + 1):(females + males + subAdults + Piglets)] <- Dam[(females + males + subAdults + 1):(females + males + subAdults + Piglets)] + size
-      Breed         <- rep(0, sum(females, males, subAdults, Piglets))
-      HomePixel     <- rep(homePixelsAll[i], sum(females, males, subAdults, Piglets))
-      CurrPixel     <- HomePixel
-      infectStatus  <- rep(0, sum(females, males, subAdults, Piglets))
-      SplitStatus   <- rep(0, sum(females, males, subAdults, Piglets))
-      SplitMale     <- rep(0, sum(females, males, subAdults, Piglets))
-      TimeDeath     <- rep(0, sum(females, males, subAdults, Piglets))
-      TimeToInfect  <- rep(0, sum(females, males, subAdults, Piglets))
-      TimeToDeath   <- rep(0, sum(females, males, subAdults, Piglets))
-      GroupMove     <- rep(0, sum(females, males, subAdults, Piglets))
-      IDs           <- (size+ 1):(size + sum(females, males, subAdults, Piglets))
-      
-      InitMatWBPop  <- cbind(IDs, GroupID, Sex, AgeCat, Age, Breed, HomePixel, CurrPixel, infectStatus, SplitStatus, Dam, SplitMale, TimeDeath, TimeToInfect, TimeToDeath, GroupMove)
-      PopMatWB   <- rbind(PopMatWB,InitMatWBPop)
-      # WBMat[unique(HomePixel), 15] <- females
-      size=nrow(PopMatWB)
-      
-    }
     
 
-    GroupsToSplit        <- matrix(numeric(0),ncol=4)  
+# Initialize the Population (Matrix of individuals) -----------------------
+    PopMatWB<-InitPop(InitialOccCells,WBMat)
+
     
-    colnames(PopMatWB) <- c("IDs", "Group_ID", "Sex", "Age_Cat", "Age_days", "Breed",
-                            "Home_pixel", "Current_pixel", "Infect_status", "Split_status", 
-                            "Dam", "Split_male", "Time_death","Time_to_infect", "Time_to_death", "Group_move")
-    
+    GroupsToSplit        <- matrix(numeric(0),ncol=4)     
     ## Store the groups that have split this year
     SplittedGroups  <- numeric(0)
     MovedGroups     <- numeric(0)
@@ -171,54 +139,29 @@ WBModel <- function( MaxIterations    = 1,
     TMPOutYesterday <- FALSE
     OnlyOnce        <- TRUE
     
-    while(Criteria & (gTime < MaxDays)){
-      
-      
-      # while(gTime < MaxDays){
-      
-   #if(gTime <= TimeSeedInf) Criteria <- TRUE else Criteria <- any(PopMatWB[ ,9] %in% c(1:4))
-      
 
+# Start of daily loop -----------------------------------------------------
+    while(Criteria & (gTime < MaxDays)){
 
       gTime <- gTime + 1
       
-      PopMatWB        <- PopMatWB[order(PopMatWB[ ,2], PopMatWB[ ,3], PopMatWB[ ,5], decreasing = T), ]
+
+# Ageing ------------------------------------------------------------------
+      PopMatWB<-Ageing(gTime,PopMatWB)
+
+#  initiate variables and matrix that have to be initiated on year --------
+
       
-      if(gTime > 365) Year <- ceiling(gTime/365)  ## Count the year 
-      PopMatWB[PopMatWB[ ,5] > 0, 5] <- PopMatWB[PopMatWB[,5] > 0, 5] + 1 #sum & day in the age in days column
-      PopMatWB[PopMatWB[ ,5] >= 365, 4]     <- 2 #convert piglets to subadults if they reach age
-      PopMatWB[PopMatWB[ ,5] >= (365*2), 4] <- 3 #convert subadults to piglets
-      
-      ### initiate variables and matrix that have to be initiated on yearly basis
       if(gTime %in% c(1, (366 * 1:(MaxDays/365)))){
-        
-        
-        ### Mortality probabilities 
-        #ProbMortFact deleted and hunting probability added
-        
-       
-        ProbMortAdF  <- 1 - (SurvivalProbAdF)^(1/365)
-        ProbMortAdM  <- 1 - (SurvivalProbAdM)^(1/365)
-        ProbMortSAdF <- 1 - (SurvivalProbSAdF)^(1/365)
-        ProbMortSAdM <- 1 - (SurvivalProbSAdM)^(1/365)
-        ProbMortPigF <- 1 - (SurvivalProbPigF)^(1/365)
-        ProbMortPigM <- 1 - (SurvivalProbPigM)^(1/365)
-        ProbHunted   <- 1 - (1 - ProbHarvest)^(1/HuntingSeason)
-        ProbHuntedAM <- 1 - (1 - ProbHarvestAM)^(1/HuntingSeason)
-        
-        ### Reproduction
-        
-        PopMatWB        <- PopMatWB[order(PopMatWB[ ,2], PopMatWB[ ,3], PopMatWB[ ,5], decreasing = T), ]
+
+# Reproduction ------------------------------------------------------------
+  # Select females that will reproduce during the year
         AnimalsWInG     <- unlist(sapply(unique(PopMatWB[ ,2]), function(x) 1:sum(PopMatWB[ ,2] == x)))
         BreedCapCells   <- c(WBMat[PopMatWB[ ,7], 15], rep(0, sum(PopMatWB[ ,7] == 0)))
-        
-        #GroupSize       <- cbind(sort(unique(PopMatWB[,2])),tapply(PopMatWB[,1],PopMatWB[,2],length))
-        
         # Animals are allowed to breed when they are females and the group size is less than the maximum allowed size (breeding capacity)
         #(size that can be maintained by the pixel habitat)
         # and the animals above the breeding capacity based on age.
         AniAllowBreed   <- AnimalsWInG <= BreedCapCells & PopMatWB[ ,3] == 1 & PopMatWB[ ,9] < 2
-      
         PopMatWB[AniAllowBreed, 6] <- (sample(RepProbList$Week, sum(AniAllowBreed), rep = T, prob = RepProbList$Prob)*7) + ((Year-1)*365)
        
         
@@ -238,44 +181,24 @@ WBModel <- function( MaxIterations    = 1,
       
       ### MORTALITY
 
-      ## We exclude infectious and death animals from disease in order to allow the carcass to persist
-      AdultsFToDie    <- which(PopMatWB[ ,4] == 3 & PopMatWB[ ,3] == 1 &! PopMatWB[ ,9] %in% 2:3)
-      AdultsFToDie    <- AdultsFToDie[rbinom(length(AdultsFToDie), 1, ProbMortAdF) == 1]
-      AdultsMToDie    <- which(PopMatWB[ ,4] == 3 & PopMatWB[ ,3] == 0 &! PopMatWB[ ,9] %in% 2:3)
-      AdultsMToDie    <- AdultsMToDie[rbinom(length(AdultsMToDie), 1, ProbMortAdM) == 1]
-      
-      SubAdultsFToDie <- which(PopMatWB[ ,4] == 2 & PopMatWB[ ,3] == 0 &! PopMatWB[ ,9] %in% 2:3)
-      SubAdultsFToDie <- SubAdultsFToDie[rbinom(length(SubAdultsFToDie), 1, ProbMortSAdF) == 1]
-      SubAdultsMToDie <- which(PopMatWB[ ,4] == 2 & PopMatWB[ ,3] == 1 &! PopMatWB[ ,9] %in% 2:3)
-      SubAdultsMToDie <- SubAdultsMToDie[rbinom(length(SubAdultsMToDie), 1, ProbMortSAdM) == 1]
-      
-      PigsFToDie      <- which(PopMatWB[ ,4] == 1 & PopMatWB[ ,3] == 0 &! PopMatWB[ ,9] %in% 2:3)
-      PigsFToDie      <- PigsFToDie[rbinom(length(PigsFToDie),1,ProbMortPigF)==1]
-      PigsMToDie      <- which(PopMatWB[ ,4] == 1 & PopMatWB[ ,3] == 1 &! PopMatWB[ ,9] %in% 2:3)
-      PigsMToDie      <- PigsMToDie[rbinom(length(PigsMToDie), 1, ProbMortPigM) == 1]
-      
-      TooOldAni       <- which(PopMatWB[ ,5] == (11*365))
-      
-      # Piglets that are less than 8 weeks and do not have a mother will die.
-      # This is based on Petersen (1999) that showed that the majority of piglets would graze on their own when they reach 8 weeks 
-      TooYoungNoMoth  <- which(PopMatWB[ ,5] < (8*7) &! (PopMatWB[ ,11] %in% PopMatWB[ ,1]) &! PopMatWB[ ,9] %in% 2:3)
-      ToDieNormal <- c(AdultsFToDie, AdultsMToDie, SubAdultsFToDie, SubAdultsMToDie, PigsFToDie, PigsMToDie, TooYoungNoMoth, TooOldAni)
-      
+ToDieNormal<-Mortality(PopMatWB,ProbMortPigF,ProbMortPigM,
+                       ProbMortSAdF,ProbMortSAdM,ProbMortAdF,ProbMortAdM)
       #Mortality caused by Hunting in population and male adults
       #Take out Piglets from being hunted
-      ToDieHunted   <- which(!(PopMatWB[ ,3] ==  0 & PopMatWB[ ,4] == 3)  &  PopMatWB[ ,4] != 1)
-      ToDieHuntedAM <- which(PopMatWB[ ,3] == 0 & PopMatWB[ ,4] == 3)
+     
       #to check if there are no piglets and male adults
       #table(data.frame(PopMatWB[which(!(PopMatWB[ ,3] ==  0 & PopMatWB[ ,4] == 3)  &  PopMatWB[ ,4] != 1),c("Sex", "Age_Cat")]))
       
       
-      ### HUNTING SEASON
+# HUNTING SEASON ----------------------------------------------------------
+      
       
       
       if(gTime %in% ((40*7 + ((Year - 1)*365)):((9*7 + ((Year)*365))))){
         
         #ToDieHunted <- which(rbinom(nrow(PopMatWB), 1, ProbHunted) == 1) #Without Hunting Pro for AM
-        
+        ToDieHunted   <- which(!(PopMatWB[ ,3] ==  0 & PopMatWB[ ,4] == 3)  &  PopMatWB[ ,4] != 1)
+        ToDieHuntedAM <- which(PopMatWB[ ,3] == 0 & PopMatWB[ ,4] == 3)
         ## Hunting without piglets and with a different hunting probability for adult males
         ToDieHunted <- ToDieHunted[rbinom(length(ToDieHunted), 1, ProbHunted) == 1]
         ToDieHuntedAM <- ToDieHuntedAM[rbinom(length(ToDieHuntedAM), 1, ProbHuntedAM) == 1]
@@ -287,8 +210,7 @@ WBModel <- function( MaxIterations    = 1,
         GroupsMoveHunt <- GroupsMoveHunt[rbinom(length(GroupsMoveHunt), 1, ProbMoveHS) == 1]
         
         GroupsMoveShD  <- sapply(PopMatWB[match(GroupsMoveHunt, PopMatWB[ ,2]), 7], function(x){
-          Distance <- sqrt((WBMat[x, 2] - WBMat[ ,2])^2 + (WBMat[x, 3] - WBMat[ ,3])^2)/1000
-          tempo1     <- which(Distance <= 9)
+          tempo1     <- which(Distance[x,] <= DistThreshold)
           any(WBMat[tempo1, 5] == 1)})
         
         GroupsMoveNumSD <- cbind(GroupsMoveHunt,  GroupsMoveShD)
@@ -303,8 +225,7 @@ WBModel <- function( MaxIterations    = 1,
           
           TargetPixel <- numeric(0)
           for(xx in OriginalPixel){
-            Distance <- sqrt((WBMat[xx, 2] - WBMat[ ,2])^2 + (WBMat[xx, 3] - WBMat[ ,3])^2)/1000
-            tempo1      <- which(Distance <= 9)
+            tempo1     <- which(Distance[xx,] <= DistThreshold)
             tempo2      <- tempo1[WBMat[tempo1, 5] == 1 & !(tempo1 %in% PopMatWB[ ,7])]
             if(length(tempo2) > 1)  tempo3 <- sample(tempo2, 1)
             if(length(tempo2) == 1) tempo3 <- tempo2
@@ -333,10 +254,8 @@ WBModel <- function( MaxIterations    = 1,
                 Edges      <- unlist(WBMat[CurrentPosition[i], 6:13])
                 Edges      <- Edges[Edges > 0 & Edges != previousEdge]
                 if(length(Edges) > 0){
-                  DistanceEdges  <- sqrt((WBMat[TargetPixel[i], 2] - WBMat[Edges, 2])^2 + 
-                                         (WBMat[TargetPixel[i], 3] - WBMat[Edges, 3])^2)/1000
                   previousEdge <- CurrentPosition[i]
-                  NewPosition  <- Edges[DistanceEdges == min(DistanceEdges)]
+                  NewPosition  <- Edges[which.min(Distance[TargetPixel[i],Edges])]
                   if(length(NewPosition) > 1) NewPosition <- sample(NewPosition, 1)
                   CurrentPosition[i] <- NewPosition
                   
@@ -441,8 +360,7 @@ WBModel <- function( MaxIterations    = 1,
         PixelMalesOnly  <- PixelMalesOnly[PixelMalesOnly[ ,2] == 1, , drop = FALSE]
         
         GroupsSplitShD  <- sapply(PopMatWB[match(GroupSplitNum[ ,1], PopMatWB[ ,2]), 7], function(x) {
-          Distance <- sqrt((WBMat[x, 2] - WBMat[ ,2])^2 + (WBMat[x, 3] - WBMat[ ,3])^2)/1000
-          tmp1     <- which(Distance <= 9)
+          tmp1 <-which(Distance[x,] <= DistThreshold)
           any(WBMat[tmp1, 5] == 1 & !(tmp1 %in% PopMatWB[!PopMatWB[ ,2] %in% PixelMalesOnly[ ,1], 7]))})
         GroupSplitNumSD <- cbind(GroupSplitNum, GroupsSplitShD)
         GroupSplitNumSD <- GroupSplitNumSD[GroupSplitNumSD[ ,3] == 1, , drop=FALSE]
@@ -457,8 +375,7 @@ WBModel <- function( MaxIterations    = 1,
           
           TargetPixel <- numeric(0)
           for(xx in OriginPixel){
-            Distance <- sqrt((WBMat[xx, 2] - WBMat[ ,2])^2 + (WBMat[xx, 3] - WBMat[ ,3])^2)/1000
-            tmp1      <- which(Distance <= 9)
+            tmp1 <-which(Distance[xx,] <= DistThreshold)
             tmp2      <- tmp1[WBMat[tmp1, 5] == 1 & !(tmp1 %in% PopMatWB[ ,7])]
             if(length(tmp2) > 1)  tmp3 <- sample(tmp2, 1)
             if(length(tmp2) == 1) tmp3 <- tmp2
@@ -489,9 +406,8 @@ WBModel <- function( MaxIterations    = 1,
                 Edges      <- unlist(WBMat[CurrentPos[i], 6:13])
                 Edges      <- Edges[Edges > 0 & Edges != prevEdge]
                 if(length(Edges) > 0){
-                  DistEdges   <- sqrt((WBMat[TargetPixel[i], 2] - WBMat[Edges, 2])^2 + (WBMat[TargetPixel[i], 3] - WBMat[Edges, 3])^2)/1000
                   prevEdge    <- CurrentPos[i]
-                  NewPosition <- Edges[DistEdges == min(DistEdges)]
+                  NewPosition <- Edges[which.min(Distance[TargetPixel[i],Edges])]
                   if(length(NewPosition) > 1) NewPosition <- sample(NewPosition, 1)
                   CurrentPos[i] <- NewPosition
                   # Here we keep track of the pixels where the pigs moved to.
