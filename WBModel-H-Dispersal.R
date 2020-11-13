@@ -287,8 +287,7 @@ WBModel <- function( MaxIterations    = 1,
         GroupsMoveHunt <- GroupsMoveHunt[rbinom(length(GroupsMoveHunt), 1, ProbMoveHS) == 1]
         
         GroupsMoveShD  <- sapply(PopMatWB[match(GroupsMoveHunt, PopMatWB[ ,2]), 7], function(x){
-          Distance <- sqrt((WBMat[x, 2] - WBMat[ ,2])^2 + (WBMat[x, 3] - WBMat[ ,3])^2)/1000
-          tempo1     <- which(Distance <= 9)
+          tempo1     <- which(Distance[x,] <= DistThreshold)
           any(WBMat[tempo1, 5] == 1)})
         
         GroupsMoveNumSD <- cbind(GroupsMoveHunt,  GroupsMoveShD)
@@ -303,8 +302,7 @@ WBModel <- function( MaxIterations    = 1,
           
           TargetPixel <- numeric(0)
           for(xx in OriginalPixel){
-            Distance <- sqrt((WBMat[xx, 2] - WBMat[ ,2])^2 + (WBMat[xx, 3] - WBMat[ ,3])^2)/1000
-            tempo1      <- which(Distance <= 9)
+            tempo1     <- which(Distance[x,] <= DistThreshold)
             tempo2      <- tempo1[WBMat[tempo1, 5] == 1 & !(tempo1 %in% PopMatWB[ ,7])]
             if(length(tempo2) > 1)  tempo3 <- sample(tempo2, 1)
             if(length(tempo2) == 1) tempo3 <- tempo2
@@ -333,10 +331,8 @@ WBModel <- function( MaxIterations    = 1,
                 Edges      <- unlist(WBMat[CurrentPosition[i], 6:13])
                 Edges      <- Edges[Edges > 0 & Edges != previousEdge]
                 if(length(Edges) > 0){
-                  DistanceEdges  <- sqrt((WBMat[TargetPixel[i], 2] - WBMat[Edges, 2])^2 + 
-                                         (WBMat[TargetPixel[i], 3] - WBMat[Edges, 3])^2)/1000
                   previousEdge <- CurrentPosition[i]
-                  NewPosition  <- Edges[DistanceEdges == min(DistanceEdges)]
+                  NewPosition  <- Edges[which.min(Distance[TargetPixel[i],Edges])]
                   if(length(NewPosition) > 1) NewPosition <- sample(NewPosition, 1)
                   CurrentPosition[i] <- NewPosition
                   
@@ -441,8 +437,7 @@ WBModel <- function( MaxIterations    = 1,
         PixelMalesOnly  <- PixelMalesOnly[PixelMalesOnly[ ,2] == 1, , drop = FALSE]
         
         GroupsSplitShD  <- sapply(PopMatWB[match(GroupSplitNum[ ,1], PopMatWB[ ,2]), 7], function(x) {
-          Distance <- sqrt((WBMat[x, 2] - WBMat[ ,2])^2 + (WBMat[x, 3] - WBMat[ ,3])^2)/1000
-          tmp1     <- which(Distance <= 9)
+          tmp1 <-which(Distance[x,] <= DistThreshold)
           any(WBMat[tmp1, 5] == 1 & !(tmp1 %in% PopMatWB[!PopMatWB[ ,2] %in% PixelMalesOnly[ ,1], 7]))})
         GroupSplitNumSD <- cbind(GroupSplitNum, GroupsSplitShD)
         GroupSplitNumSD <- GroupSplitNumSD[GroupSplitNumSD[ ,3] == 1, , drop=FALSE]
@@ -457,8 +452,7 @@ WBModel <- function( MaxIterations    = 1,
           
           TargetPixel <- numeric(0)
           for(xx in OriginPixel){
-            Distance <- sqrt((WBMat[xx, 2] - WBMat[ ,2])^2 + (WBMat[xx, 3] - WBMat[ ,3])^2)/1000
-            tmp1      <- which(Distance <= 9)
+            tmp1 <-which(Distance[x,] <= DistThreshold)
             tmp2      <- tmp1[WBMat[tmp1, 5] == 1 & !(tmp1 %in% PopMatWB[ ,7])]
             if(length(tmp2) > 1)  tmp3 <- sample(tmp2, 1)
             if(length(tmp2) == 1) tmp3 <- tmp2
@@ -489,9 +483,8 @@ WBModel <- function( MaxIterations    = 1,
                 Edges      <- unlist(WBMat[CurrentPos[i], 6:13])
                 Edges      <- Edges[Edges > 0 & Edges != prevEdge]
                 if(length(Edges) > 0){
-                  DistEdges   <- sqrt((WBMat[TargetPixel[i], 2] - WBMat[Edges, 2])^2 + (WBMat[TargetPixel[i], 3] - WBMat[Edges, 3])^2)/1000
                   prevEdge    <- CurrentPos[i]
-                  NewPosition <- Edges[DistEdges == min(DistEdges)]
+                  NewPosition <- Edges[which.min(Distance[TargetPixel[i],Edges])]
                   if(length(NewPosition) > 1) NewPosition <- sample(NewPosition, 1)
                   CurrentPos[i] <- NewPosition
                   # Here we keep track of the pixels where the pigs moved to.
