@@ -63,9 +63,9 @@ WBModel <- function( MaxIterations    = 1,
                      AREA             = 1,
                      
                      #Reproduction Parameters
-                     RepProbList      = list(Week = 1:26,
-                                             Prob = c(0, 0, 0, 0.01, 0.05, 0.1, 0.2, 0.23, 0.28, 0.325, 0.35, 0.325, 0.3, 0.28, 0.25, 0.22, 0.18, 0.17, 0.16, 0.15,
-                                                    0.14, 0.13, 0.12, 0.08, 0.04, 0.0)),
+                     # RepProbList      = list(Week = 1:26,
+                     #                         Prob = c(0, 0, 0, 0.01, 0.05, 0.1, 0.2, 0.23, 0.28, 0.325, 0.35, 0.325, 0.3, 0.28, 0.25, 0.22, 0.18, 0.17, 0.16, 0.15,
+                     #                                0.14, 0.13, 0.12, 0.08, 0.04, 0.0)),
                      NumOfSprProbList = list(Number=0:8,
                                              Prob=c(0.01, 0.07, 0.16, 0.25, 0.25, 0.16, 0.07, 0.02, 0.001)),
                      DirectionList    =  list(c(6, 7, 8), c(8, 10, 13), c(11, 12, 13), c(6, 9, 11)), ## North, ## East, ## South, and ## West
@@ -82,7 +82,12 @@ WBModel <- function( MaxIterations    = 1,
   coords<-as.matrix(WBMat[,c('Lon','Lat')])
   Distance<-as.matrix(dist(coords))
   
-  
+  probRepro<-0
+  for(i in 1:51) probRepro<-c(probRepro,trapz(i:(i+1),dgamma(i:(i+1),shape=6.4,scale=2.1)))
+  probRepro[1]=1-sum(probRepro)
+  RepProbList      = list(Week = 1:52,
+                          Prob = probRepro)
+
 
 # Initialize model outcomes.  ---------------------------------------------
 
@@ -1029,7 +1034,7 @@ Scenarios <- data.frame(Sc = c(1:40),
 
  # Scenarios$Sc
  
-for (i in 40) {
+for (i in 39) {
   
   HabitatProb = get(as.character(Scenarios[Scenarios$Sc == i,"HabitatProb"]))
 
