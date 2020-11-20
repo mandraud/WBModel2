@@ -113,6 +113,8 @@ WBModel <- function( MaxIterations    = 1,
 #  Initialize Mortality probabilities -------------------------------------
   ### Mortality probabilities 
   #ProbMortFact deleted and hunting probability added
+  
+  
   ProbMortAdF  <- 1 - (SurvivalProbAdF)^(1/365)
   ProbMortAdM  <- 1 - (SurvivalProbAdM)^(1/365)
   ProbMortSAdF <- 1 - (SurvivalProbSAdF)^(1/365)
