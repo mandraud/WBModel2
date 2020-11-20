@@ -107,9 +107,6 @@ WBModel <- function( MaxIterations    = 1,
   
 
 
-# A2AAAAA -----------------------------------------------------------------
-
-
 
 #  Initialize Mortality probabilities -------------------------------------
   ### Mortality probabilities 
