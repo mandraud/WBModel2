@@ -1059,4 +1059,3 @@ for (i in 39) {
 #     WBModel(ProbMovHunt = ProbMovHunt, InitialOccCells = InitialOccCells)
 #   }
 # }
-
