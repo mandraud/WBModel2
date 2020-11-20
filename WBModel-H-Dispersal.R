@@ -39,7 +39,7 @@ WBModel <- function( MaxIterations    = 1,
                      ProbSplitSDS     = 1/7,  #cumsum(rep(1/7,7))     # Probability of short distance split if all conditions are satisfied for a group to split per day during the week of splitting (female splitting)
                      ProbSplitMSA     = 1/(6*7), #cumsum(rep(1/(6*7),6*7)) # Probability of male splitting per group per day of the week (7days) of the total splitting period (6 weeks)
                      SettlingProb     = c(0.75, 1),                   # probability to settle for a male in a habitat cell if it was only good habitat (0.5) or good habitat with females (1.0)
-                     ProbMoveHS       = 1/HuntingSeason,              # daily probability of group splitting during the whole Hunting season
+                     ProbMoveHS       = 0.3,                         # probability of group movements due to hunting
                      FemPropGroup     = mean(c(14.7,18.1,12.8,14.6)), # Proportion of females within a group Merta et al. (2015)  
                      MalPropGroup     = mean(c(9.2,9,5.7,7.9)),       # Proportion of males within a group Merta et al. (2015)
                      SubAPropGroup    = mean(c(33.4,34.3,22.8,24.1)), # Proportion of sub-adults within a group Merta et al. (2015)
@@ -101,12 +101,15 @@ WBModel <- function( MaxIterations    = 1,
   Fimmunecount         <- matrix(0, MaxDays, nrow(WBMat))
   
 
+
+# A2AAAAA -----------------------------------------------------------------
+
+
+
 #  Initialize Mortality probabilities -------------------------------------
   ### Mortality probabilities 
   #ProbMortFact deleted and hunting probability added
-  ProbMortAdF  <- 1 - (SurvivalProbAdF)^(1/365)
-  ProbMortAdM  <- 1 - (SurvivalProbAdM)^(1/365)
-  ProbMortSAdF <- 1 - (SurvivalProbSAdF)^(1/365)
+  
   ProbMortSAdM <- 1 - (SurvivalProbSAdM)^(1/365)
   ProbMortPigF <- 1 - (SurvivalProbPigF)^(1/365)
   ProbMortPigM <- 1 - (SurvivalProbPigM)^(1/365)
@@ -132,6 +135,8 @@ WBModel <- function( MaxIterations    = 1,
     SplittedGroups  <- numeric(0)
     MovedGroups     <- numeric(0)
     cumDeathPar     <- 0
+    cumDeathHunt    <- 0
+    
     cumDeathInf     <- 0
     Year            <- 1
     gTime           <- 0
@@ -144,7 +149,7 @@ WBModel <- function( MaxIterations    = 1,
     while(Criteria & (gTime < MaxDays)){
 
       gTime <- gTime + 1
-      
+      if(gTime %% 366 == 0) Year <- Year + 1
 
 # Ageing ------------------------------------------------------------------
       PopMatWB<-Ageing(gTime,PopMatWB)
@@ -185,14 +190,18 @@ ToDieNormal<-Mortality(PopMatWB,ProbMortPigF,ProbMortPigM,
                        ProbMortSAdF,ProbMortSAdM,ProbMortAdF,ProbMortAdM)
       #Mortality caused by Hunting in population and male adults
       #Take out Piglets from being hunted
-     
+if(length(ToDieNormal) > 0){
+  PopMatWB<-PopMatWB[-ToDieNormal, ]
+  cumDeathPar <- cumDeathPar + length(ToDieNormal)
+}
+
       #to check if there are no piglets and male adults
       #table(data.frame(PopMatWB[which(!(PopMatWB[ ,3] ==  0 & PopMatWB[ ,4] == 3)  &  PopMatWB[ ,4] != 1),c("Sex", "Age_Cat")]))
       
       
 # HUNTING SEASON ----------------------------------------------------------
-      
-      
+      ToDieHuntedAM <- NULL
+      ToDieHunted<- NULL
       
       if(gTime %in% ((40*7 + ((Year - 1)*365)):((9*7 + ((Year)*365))))){
         
@@ -200,62 +209,82 @@ ToDieNormal<-Mortality(PopMatWB,ProbMortPigF,ProbMortPigM,
         ToDieHunted   <- which(!(PopMatWB[ ,3] ==  0 & PopMatWB[ ,4] == 3)  &  PopMatWB[ ,4] != 1)
         ToDieHuntedAM <- which(PopMatWB[ ,3] == 0 & PopMatWB[ ,4] == 3)
         ## Hunting without piglets and with a different hunting probability for adult males
-        ToDieHunted <- ToDieHunted[rbinom(length(ToDieHunted), 1, ProbHunted) == 1]
-        ToDieHuntedAM <- ToDieHuntedAM[rbinom(length(ToDieHuntedAM), 1, ProbHuntedAM) == 1]
+        ToDieHunted <- ToDieHunted[runif(length(ToDieHunted))<ProbHunted]
+        ToDieHuntedAM <- ToDieHuntedAM[runif(length(ToDieHuntedAM))<ProbHuntedAM]
         
+        ToDieHunt <- c(ToDieHunted, ToDieHuntedAM)
+        GroupsMoveHunt <- sort(unique(PopMatWB[ToDieHunt ,2]))
+        
+       
+        if(length(ToDieHunt) > 0){
+          PopMatWB<-PopMatWB[-ToDieHunt, ]
+          cumDeathHunt <- cumDeathHunt + length(ToDieHunt)
+        }
         ## Movement caused by hunting during Hunting Season
         ## Groups that will split due to hunting
-        GroupsMoveHunt <- sort(unique(PopMatWB[ ,2]))
-        #GroupsMoveHunt <- GroupsMoveHunt[GroupsMoveHunt[ ,2] >= 1, , drop = FALSE]
-        GroupsMoveHunt <- GroupsMoveHunt[rbinom(length(GroupsMoveHunt), 1, ProbMoveHS) == 1]
         
-        GroupsMoveShD  <- sapply(PopMatWB[match(GroupsMoveHunt, PopMatWB[ ,2]), 7], function(x){
-          tempo1     <- which(Distance[x,] <= DistThreshold)
-          any(WBMat[tempo1, 5] == 1)})
+        #Proposition of modification of movement pattern in hunted groups
+        # GroupsMoveHunt <- sort(unique(PopMatWB[ ,2]))
         
-        GroupsMoveNumSD <- cbind(GroupsMoveHunt,  GroupsMoveShD)
-        GroupsMoveNumSD <- GroupsMoveNumSD[GroupsMoveNumSD[ ,2] == 1, , drop = FALSE]
+        GroupsMoveHunt <- GroupsMoveHunt[runif(length(GroupsMoveHunt))< ProbMoveHS]
         
-        ## Keep track of the groups that have moved due to hunting
-        PopMatWB[PopMatWB[ ,2] %in% GroupsMoveNumSD[ ,1], 16] <- 2
-        
-        ## Make Short distance happened
-        if(dim(GroupsMoveNumSD)[1] > 0){
-          OriginalPixel     <- PopMatWB[match(GroupsMoveNumSD[ ,1], PopMatWB[ ,2]), 7]
-          
-          TargetPixel <- numeric(0)
-          for(xx in OriginalPixel){
-            tempo1     <- which(Distance[xx,] <= DistThreshold)
-            tempo2      <- tempo1[WBMat[tempo1, 5] == 1 & !(tempo1 %in% PopMatWB[ ,7])]
-            if(length(tempo2) > 1)  tempo3 <- sample(tempo2, 1)
-            if(length(tempo2) == 1) tempo3 <- tempo2
-            if(length(tempo2) == 0) tempo3 <- 0
-            TargetPixel <- c(TargetPixel, tempo3)
-          }
-          
-          GroupsMoveNumSD <- GroupsMoveNumSD[TargetPixel > 0, , drop = FALSE]
-          OriginalPixel     <- OriginalPixel[TargetPixel > 0]
-          TargetPixel     <- TargetPixel[TargetPixel > 0]
-          GroupsMoveNumSD <- cbind(GroupsMoveNumSD, TargetPixel) 
-          
+        # GroupsMoveShD  <- sapply(PopMatWB[match(GroupsMoveHunt, PopMatWB[ ,2]), 7], function(x){
+        #   tempo1     <- which(Distance[x,] <= DistThreshold)
+        #   any(WBMat[tempo1, 5] == 1)})
+        # 
+        # GroupsMoveNumSD <- cbind(GroupsMoveHunt,  GroupsMoveShD)
+        # GroupsMoveNumSD <- GroupsMoveNumSD[GroupsMoveNumSD[ ,2] == 1, , drop = FALSE]
+        # 
+        # ## Keep track of the groups that have moved due to hunting
+        # PopMatWB[PopMatWB[ ,2] %in% GroupsMoveNumSD[ ,1], 16] <- 2
+        # 
+        # ## Make Short distance happened
+        # if(dim(GroupsMoveNumSD)[1] > 0){
+        #   OriginalPixel     <- PopMatWB[match(GroupsMoveNumSD[ ,1], PopMatWB[ ,2]), 7]
+        #   
+        #   TargetPixel <- numeric(0)
+        #   for(xx in OriginalPixel){
+        #     tempo1     <- which(Distance[xx,] <= DistThreshold)
+        #     tempo2      <- tempo1[WBMat[tempo1, 5] == 1 & !(tempo1 %in% PopMatWB[ ,7])]
+        #     if(length(tempo2) > 1)  tempo3 <- sample(tempo2, 1)
+        #     if(length(tempo2) == 1) tempo3 <- tempo2
+        #     if(length(tempo2) == 0) tempo3 <- 0
+        #     TargetPixel <- c(TargetPixel, tempo3)
+        #   }
+        #   
+        TargetPixel<- sapply(PopMatWB[match(GroupsMoveHunt, PopMatWB[ ,2]), 7], function(xx){
+          tempo1     <- which(Distance[xx,] <= DistThreshold)
+              tempo2      <- tempo1[WBMat[tempo1, 5] == 1 & !(tempo1 %in% PopMatWB[ ,7])]
+              if (length(tempo2) > 1)  tempo3 <- sample(tempo2, 1)
+              if (length(tempo2) == 1) tempo3 <- tempo2
+              if (length(tempo2) == 0) tempo3 <- 0     
+              return(tempo3)
+              })
+
+
+          GroupsMoveNumHS <- data.frame(OriginalPixel=PopMatWB[match(GroupsMoveHunt, PopMatWB[ ,2]), 7],GroupsMoveHunt, TargetPixel) 
+          GroupsMoveNumHS <- GroupsMoveNumHS[GroupsMoveNumHS$TargetPixel>0,]
+          # OriginalPixel     <- OriginalPixel[TargetPixel > 0]
+          # TargetPixel     <- TargetPixel[TargetPixel > 0]
           ## Allow Movement
-          if(dim(GroupsMoveNumSD)[1] > 0){
+          if(nrow(GroupsMoveNumHS) > 0){
             ## Create a list to keep track of pixels where the group have been. 
             ## Exported on a daily basis, the list will be re-initiate every day.
             ## How many times does the group tries to move?
-            PixelsMovedHS <- as.list(matrix(0, ncol = length(TargetPixel)))
-            CurrentPosition <- OriginalPixel
+    
+            PixelsMovedHS <-  vector(mode = "list", length =length(GroupsMoveNumHS$TargetPixel))
+            CurrentPosition <- GroupsMoveNumHS$OriginalPixel
             
-            for(i in 1:length(TargetPixel)){
+            for(i in 1:length(GroupsMoveNumHS$TargetPixel)){
               Trail <- 0
               previousEdge <- CurrentPosition[i]
-              while(CurrentPosition[i] != TargetPixel[i] & Trail < 10){
+              while(CurrentPosition[i] != GroupsMoveNumHS$TargetPixel[i] & Trail < 10){
                 Trail      <- Trail + 1
                 Edges      <- unlist(WBMat[CurrentPosition[i], 6:13])
                 Edges      <- Edges[Edges > 0 & Edges != previousEdge]
                 if(length(Edges) > 0){
                   previousEdge <- CurrentPosition[i]
-                  NewPosition  <- Edges[which.min(Distance[TargetPixel[i],Edges])]
+                  NewPosition  <- Edges[which.min(Distance[GroupsMoveNumHS$TargetPixel[i],Edges])]
                   if(length(NewPosition) > 1) NewPosition <- sample(NewPosition, 1)
                   CurrentPosition[i] <- NewPosition
                   
@@ -264,247 +293,85 @@ ToDieNormal<-Mortality(PopMatWB,ProbMortPigF,ProbMortPigM,
                   #print(c(i,OriginPixel[i],prevEdge,Trail,CurrentPos[i],TargetPixel[i]))
                 }
               }
-            }
+              which(PopMatWB[,7]==GroupsMoveNumHS$OriginalPixel[i])->moved
+              if (CurrentPosition[i] == GroupsMoveNumHS$TargetPixel[i]){
+                if (GroupsMoveNumHS$TargetPixel[i] %in% PopMatWB[,7]){
+                  PopMatWB[moved,2]= PopMatWB[GroupsMoveNumHS$TargetPixel[i]==PopMatWB[,7],2][1]
+                }
+                PopMatWB[moved,7]=GroupsMoveNumHS$TargetPixel[i]
+                PopMatWB$Current_pixel[moved]<-GroupsMoveNumHS$TargetPixel[i]
+                PopMatWB[moved,"Split_status"]<-2
+                }
+              }
             
-            names(PixelsMovedHS) <- GroupsMoveNumSD[ ,1]
-            MovedGroupsHS <- PopMatWB[ ,2] %in% GroupsMoveNumSD[ ,1]
+            
+            names(PixelsMovedHS) <- GroupsMoveNumHS[ ,1]
+            GroupsMoveNumHS=GroupsMoveNumHS[which(do.call(c,lapply(PixelsMovedHS,function(x) length(x)>0))),]
+            # MovedGroupsHS <-(PopMatWB[ ,7],GroupsMoveNumHS$OriginalPixel)
+            # PopMatWB[MovedGroupsHS ,7]
             #IndexNotSplit    <- which(CurrentPosition != TargetPixel)
             #GroupsMoveNumSD <- GroupsMoveNumSD[-IndexNotSplit, , drop = FALSE]
-            
           }
-        }
+          
         
         ### ADD THE UPDATE FOR THE HOME PIXEL
 
         ## Include hunted individuals in the death toll. Else is outside Hunting Season
-        
-        ToDieAll <- unique(c(ToDieNormal, ToDieHunted, ToDieHuntedAM)) 
-      } else {
-        ToDieAll <- ToDieNormal
-      }
+      } 
+       
+      # } else {
+      #   ToDieAll <- ToDieNormal
+  
 
-      ## Include death toll in the cumulative deaths (not infected)
-      
-      if(length(ToDieAll) > 0){
-        PopMatWB<-PopMatWB[-ToDieAll, ]
-        cumDeathPar <- cumDeathPar + length(ToDieAll)
-      }
+      # ## Include death toll in the cumulative deaths (not infected)
+      # 
+      # if(length(ToDieAll) > 0){
+      #   PopMatWB<-PopMatWB[-ToDieAll, ]
+      #   cumDeathPar <- cumDeathPar + length(ToDieAll)
+      # }
       
       ## Reset the movement due to hunting each year
-      
-      if(gTime %in% ((40*7 + ((Year - 1)*365)):((9*7 + ((Year)*365))) + 1)){
+      ## Only do it once when the hunting season ends. 
+      if(gTime == ((9*7 + ((Year-1)*365)) + 1)){
         PopMatWB[ ,16]    <- 0
+        cumDeathHunt <- 0
         #SplittedGroups   <- numeric(0)
-        PixelsMovedHS      <- as.list(matrix(0, ncol=1))
+        # PixelsMovedHS      <- as.list(matrix(0, ncol=1))
       }
       
-      
+
       
       ### REPRODUCTION
       
       
       ## On daily basis, from Jan to end June, check if there are animals to deliver and make them deliver
-        if(gTime %in% PopMatWB[ ,6]){
-        DelIndex        <- which(PopMatWB[ ,6] %in% gTime & PopMatWB[ ,9] != 3)
-        NumOfSpring     <- sample(NumOfSprProbList$Number, length(DelIndex), rep = T, prob = NumOfSprProbList$Prob)
-        DelIndex        <- DelIndex[NumOfSpring > 0]
-        NumOfSpring     <- NumOfSpring[NumOfSpring > 0]
-        if(length(NumOfSpring) > 0){
-          newBorns<-cbind((max(PopMatWB[ ,1]) + 1):(max(PopMatWB[ ,1]) + sum(NumOfSpring)),
-                          rep(PopMatWB[DelIndex,2],NumOfSpring),
-                          rbinom(sum(NumOfSpring),1,0.5),
-                          1,
-                          1,
-                          0,
-                          rep(PopMatWB[DelIndex,7],NumOfSpring),
-                          rep(PopMatWB[DelIndex,7],NumOfSpring),
-                          0,
-                          0,
-                          rep(PopMatWB[DelIndex,1],NumOfSpring),
-                          0,
-                          0,
-                          0,
-                          0,
-                          0)
-          colnames(newBorns)=colnames(PopMatWB)
-          PopMatWB <- rbind(PopMatWB,newBorns)         
-          PopMatWB <- PopMatWB[order(PopMatWB[,2],PopMatWB[,3],PopMatWB[,5],decreasing=T),]
-          
-        }
-      }
+        PopMatWB <- Reproduction(gTime, PopMatWB, NumOfSprProbList)
       
       
       ### FEMALE GROUP SPLITTING
       
       
-      ## Occurs only once in week 28 Kramer-Schadt et al. (2009)
-      if(gTime %in% ((28*7 + ((Year - 1)*365)) + 0:6)){
-        
-        ## Calculate the day in the week
-        #DayInWeekSSplit <- (1-(ceiling((gTime-(365*(Year-1)))/7) - ((gTime-(365*(Year-1)))/7)))*7
-        PopMatWB        <- PopMatWB[order(PopMatWB[ ,2], PopMatWB[ ,3], PopMatWB[ ,5], decreasing = T), ]
-        AnimalsWInG     <- unlist(sapply(unique(PopMatWB[ ,2]), function(x) 1:sum(PopMatWB[ ,2] == x)))
-        BreedCapCells   <- c(WBMat[PopMatWB[ ,7] ,15], rep(0, sum(PopMatWB[ ,7] == 0)))
-        ## Identify the animals within the groups that will split
-        ## Females sub-adults > breading capacity, did not split before and are not sick
-        GroupSplitNum   <- cbind(sort(unique(PopMatWB[ ,2])), (tapply((AnimalsWInG > BreedCapCells &
-                                                                        PopMatWB[ ,4] == 2 &
-                                                                        PopMatWB[ ,3] == 1 &
-                                                                        PopMatWB[,10] == 0 &
-                                                                        PopMatWB[,9] < 2),  PopMatWB[ ,2], sum)))
-        GroupSplitNum   <- GroupSplitNum[GroupSplitNum[ ,2] >= 2, , drop = FALSE]
-        
-        ## Identify groups where there are only males
-        ## To allow females to join groups where there are only males.
-        PixelMalesOnly  <- cbind(sort(unique(PopMatWB[ ,2])), (tapply((PopMatWB[ ,3] == 0), PopMatWB[ ,2], all)))
-        PixelMalesOnly  <- PixelMalesOnly[PixelMalesOnly[ ,2] == 1, , drop = FALSE]
-        
-        GroupsSplitShD  <- sapply(PopMatWB[match(GroupSplitNum[ ,1], PopMatWB[ ,2]), 7], function(x) {
-          tmp1 <-which(Distance[x,] <= DistThreshold)
-          any(WBMat[tmp1, 5] == 1 & !(tmp1 %in% PopMatWB[!PopMatWB[ ,2] %in% PixelMalesOnly[ ,1], 7]))})
-        GroupSplitNumSD <- cbind(GroupSplitNum, GroupsSplitShD)
-        GroupSplitNumSD <- GroupSplitNumSD[GroupSplitNumSD[ ,3] == 1, , drop=FALSE]
-        
-        ## Groups to split, may split during any day of the week. No need for a probability here the group splits only once a year.
-        #if(dim(GroupSplitNumSD)[1]>0) GroupSplitNumSD <- GroupSplitNumSD[rbinom(dim(GroupSplitNumSD)[1],1,prob=ProbSplitSDS)==1,,drop=FALSE]
-        PopMatWB[PopMatWB[ ,2] %in% GroupSplitNumSD[ ,1], 10] <- 1  #Make all group split status 1??
-        
-        ## Make short term split to happen
-        if(dim(GroupSplitNumSD)[1] > 0){
-          OriginPixel     <- PopMatWB[match(GroupSplitNumSD[ ,1], PopMatWB[ ,2]), 7]
-          
-          TargetPixel <- numeric(0)
-          for(xx in OriginPixel){
-            tmp1 <-which(Distance[xx,] <= DistThreshold)
-            tmp2      <- tmp1[WBMat[tmp1, 5] == 1 & !(tmp1 %in% PopMatWB[ ,7])]
-            if(length(tmp2) > 1)  tmp3 <- sample(tmp2, 1)
-            if(length(tmp2) == 1) tmp3 <- tmp2
-            if(length(tmp2) == 0) tmp3 <- 0
-            TargetPixel <- c(TargetPixel, tmp3)
-          }
-          
-          GroupSplitNumSD <- GroupSplitNumSD[TargetPixel>0, , drop = FALSE]
-          OriginPixel     <- OriginPixel[TargetPixel > 0]
-          TargetPixel     <- TargetPixel[TargetPixel > 0]
-          GroupSplitNumSD <- cbind(GroupSplitNumSD, TargetPixel) 
-          
-          ## This part of the code to allow movement
-          if(dim(GroupSplitNumSD)[1] > 0){
+        PopMatWB <- FemaleSplitting(gTime,PopMatWB,WBMat,Year,Distance,DistThreshold)
             
-            ## A list to keep track for the pixels where the pigs have been. 
-            ## Make sure that this information is exported on daily basis, because the 
-            ## list will be re-initiate every day splitting may happen.
-            PixelsMoved <- as.list(matrix(0, ncol = length(TargetPixel)))
-            
-            
-            CurrentPos <- OriginPixel
-            for(i in 1:length(TargetPixel)){
-              Trail <- 0
-              prevEdge <- CurrentPos[i]
-              while(CurrentPos[i] != TargetPixel[i] & Trail < 10){
-                Trail      <- Trail + 1
-                Edges      <- unlist(WBMat[CurrentPos[i], 6:13])
-                Edges      <- Edges[Edges > 0 & Edges != prevEdge]
-                if(length(Edges) > 0){
-                  prevEdge    <- CurrentPos[i]
-                  NewPosition <- Edges[which.min(Distance[TargetPixel[i],Edges])]
-                  if(length(NewPosition) > 1) NewPosition <- sample(NewPosition, 1)
-                  CurrentPos[i] <- NewPosition
-                  # Here we keep track of the pixels where the pigs moved to.
-                  PixelsMoved[[i]]<- c(PixelsMoved[[i]], NewPosition)
-                  #print(c(i,OriginPixel[i],prevEdge,Trail,CurrentPos[i],TargetPixel[i]))
-                }
-              }
-            }
-            
-            ## Here we assume that groups that did not find the way, did not actually split as the edges were not connected.
-            IndexNotSplit   <- which(CurrentPos != TargetPixel)
-            #GroupSplitNumSD <- GroupSplitNumSD[-IndexNotSplit, ,drop = FALSE]
-            
-            ## Make females from different groups moving to a new pixel to form a new group.
-            if(dim(GroupSplitNumSD)[1] > 0){
-              newGroupIDs <- (max(PopMatWB[,2]) + 1):(max(PopMatWB[ ,2]) + dim(GroupSplitNumSD)[1])
-              if(sum(duplicated(GroupSplitNumSD[ ,4])) > 0){ #Target pixel
-                for(l in unique(GroupSplitNumSD[ ,4])){
-                  TEMP  <- which(GroupSplitNumSD[ ,4] == l)
-                  if(length(TEMP) > 1){
-                    newGroupIDs[TEMP] <- newGroupIDs[TEMP[1]]
-                  }
-                }
-              }
-              
-              names(PixelsMoved) <- GroupSplitNumSD[ ,1]
-              for(b in 1:dim(GroupSplitNumSD)[1]){
-                
-                ## If there is a male group already in the pixel and is not splitting, then make them one group with the new females.
-                ## Notice the code above allows them to come into a new pixel only if it is empty or there are only males. 
-                ## Dont worry tat IndexMalComb1 is matching with all PopMatWB[,7]
-                IndexMalComb1  <- GroupSplitNumSD[b, 4] %in% PopMatWB[ ,7]
-                if(IndexMalComb1){
-                  IndexMalComb2  <- unique(PopMatWB[PopMatWB[ ,7] == GroupSplitNumSD[b, 4], 2]) %in% GroupsToSplit[ ,1]
-                  if(!IndexMalComb2){
-                    AnimalsCanSplitF <- AnimalsWInG>BreedCapCells & 
-                                          PopMatWB[ ,3] == 1 & 
-                                          PopMatWB[ ,4] == 2 & 
-                                          PopMatWB[ ,9] < 2  & 
-                                          PopMatWB[ ,2] %in% GroupSplitNumSD[b, 1]
-                    MalesInPixel     <- PopMatWB[ ,3] == 0 & 
-                                        PopMatWB[ ,9] != 3 & 
-                                        PopMatWB[ ,7] == GroupSplitNumSD[b, 4] & 
-                                       !PopMatWB[ ,2] %in% GroupsToSplit[ ,1]
-                    newGroupIDsAn    <- rep(newGroupIDs[b], sum(AnimalsCanSplitF) + sum(MalesInPixel)) 
-                    NewHomePixel     <- rep(GroupSplitNumSD[b, 4], sum(AnimalsCanSplitF) + sum(MalesInPixel))
-                    PopMatWB[AnimalsCanSplitF|MalesInPixel, 2]  <- newGroupIDsAn
-                    PopMatWB[AnimalsCanSplitF|MalesInPixel, 7]  <- NewHomePixel
-                    PopMatWB[AnimalsCanSplitF|MalesInPixel, 8]  <- NewHomePixel
-                  }
-                  if(IndexMalComb2){
-                    AnimalsCanSplitF <- AnimalsWInG > BreedCapCells & 
-                                        PopMatWB[ ,3] == 1 & 
-                                        PopMatWB[ ,4] == 2 & 
-                                        PopMatWB[ ,9] < 2  & 
-                                        PopMatWB[ ,2] %in% GroupSplitNumSD[b, 1]
-                    newGroupIDsAn    <- rep(newGroupIDs[b], sum(AnimalsCanSplitF)) 
-                    NewHomePixel     <- rep(GroupSplitNumSD[b, 4], sum(AnimalsCanSplitF))
-                    PopMatWB[AnimalsCanSplitF, 2]  <- newGroupIDsAn
-                    PopMatWB[AnimalsCanSplitF, 7]  <- NewHomePixel
-                    PopMatWB[AnimalsCanSplitF, 8]  <- NewHomePixel
-                  }   
-                }
-                if(!IndexMalComb1){
-                  AnimalsCanSplitF <- AnimalsWInG > BreedCapCells & 
-                                      PopMatWB[ ,3] == 1 & 
-                                      PopMatWB[ ,4] == 2 & 
-                                      PopMatWB[ ,9] < 2  & 
-                                      PopMatWB[ ,2] %in% GroupSplitNumSD[b, 1]
-                  newGroupIDsAn    <- rep(newGroupIDs[b], sum(AnimalsCanSplitF)) 
-                  NewHomePixel     <- rep(GroupSplitNumSD[b, 4], sum(AnimalsCanSplitF))
-                  PopMatWB[AnimalsCanSplitF, 2]  <- newGroupIDsAn
-                  PopMatWB[AnimalsCanSplitF, 7]  <- NewHomePixel
-                  PopMatWB[AnimalsCanSplitF, 8]  <- NewHomePixel
-                }   
-              }
-            }
-          } 
-        }
-      }#Closes short distance splitting
-      
+
       ## After the end of female splitting, we reset female splitting.
       if(gTime %in% ((28*7 + ((Year - 1)*365)) + 7)){
         PopMatWB[ ,10]    <- 0
         SplittedGroups   <- numeric(0)
-        PixelsMoved      <- as.list(matrix(0, ncol = 1))
       }
       
       
-      ### MALE GROUP SPLITTING
+
+# MALE GROUP SPLITTING ----------------------------------------------------
+
+
      
       
       ## First we determine the period of splitting of males, as defined in Lange et al., (2012). 
       ## Males may find a pixel to live in otherwise they will keep Wondering around 
       ## until they either die or find a place to live in
       if(gTime%in%((25*7 + ((Year - 1)*365)):(30*7 + ((Year - 1)*365)))){
-        
+        PopMatWB[,12] <- 0
         ## Sort the matrix
         PopMatWB    <-  PopMatWB[order(PopMatWB[ ,2], PopMatWB[ ,3], PopMatWB[ ,5], decreasing = T), ]
         ## Define the males as adults and sub-adults
@@ -513,7 +380,7 @@ ToDieNormal<-Mortality(PopMatWB,ProbMortPigF,ProbMortPigM,
         #GroupSplittedThisYear <- cbind(sort(unique(PopMatWB[,2])),tapply(PopMatWB[,12],PopMatWB[,2],sum))
         #GroupSplittedThisYear <- GroupSplittedThisYear[GroupSplittedThisYear[,2]>0,,drop=FALSE]
         
-        ## Calculate number of adult males
+        ## Calculate number of adult males in groups
         NumbAdultMInG <-  cbind(sort(unique(PopMatWB[ ,2])), tapply(PopMatWB[ ,3] == 0 & 
                                                                     PopMatWB[ ,4] == 3, 
                                                                     PopMatWB[ ,2], sum))
@@ -549,15 +416,19 @@ ToDieNormal<-Mortality(PopMatWB,ProbMortPigF,ProbMortPigM,
               PopMatWB[tmpSAM,12] <- 1
               ## Store the group number of the groups that have splited
               SplittedGroups <- c(SplittedGroups, unique(PopMatWB[tmpSAM, 2]))
+              if (length(unique(PopMatWB[tmpSAM, 7]))!=dim(AinmFromGToSplit)[1]){
+                print(AinmFromGToSplit)
+              }
               ## Number of splitting males per group
-              AinmFromGToSplit   <- cbind(AinmFromGToSplit, round(runif(dim(AinmFromGToSplit)[1], 1, 4)), unique(PopMatWB[tmpSAM, 8]))
+              AinmFromGToSplit   <- cbind(AinmFromGToSplit, round(runif(dim(AinmFromGToSplit)[1], 1, 4)), unique(PopMatWB[tmpSAM, 7]))
               ## The third column, informs about the direction
               ## Which should be depicted from the DirectionList. each group would walk in a specific direction
               ## If they cannot find a connecting edge in that direction, a random cell is then selected.
               ## Make them to prefer to move through habitat cells rather than fields.
-              indexsNGroups  <- (max(PopMatWB[ ,2]) + 1):(max(PopMatWB[ ,2]) + dim(AinmFromGToSplit)[1])
+              indexsNGroups  <- max(PopMatWB[ ,2]) + (1:dim(AinmFromGToSplit)[1])
               indexNGPigs    <- rep(indexsNGroups, AinmFromGToSplit[ ,2])
-              indexNewGNum   <- sort(which(PopMatWB[ ,2] %in% AinmFromGToSplit[ ,1] & PopMatWB[ ,12] == 1), decreasing = T)
+              indexNewGNum   <- sort(which(PopMatWB[ ,2] %in% AinmFromGToSplit[ ,1] & 
+                                             PopMatWB[ ,12] == 1), decreasing = T)
               PopMatWB[indexNewGNum, 2] <- indexNGPigs
               AinmFromGToSplit[ ,1] <- indexsNGroups
               GroupsToSplit <- rbind(GroupsToSplit, AinmFromGToSplit)      
@@ -1125,18 +996,18 @@ ToDieNormal<-Mortality(PopMatWB,ProbMortPigF,ProbMortPigM,
 HC3 = c(0.75, 0.20, 0.05)
 HC2 = c(0.75,0.25)
 
-Scenarios <- data.frame(Sc = c(1:39),
-                        ProbHarvest   = c(rep(0, 2), rep(0.40, 2), 0, rep(0.40, 20), 0, 0.70, 0.90, rep(0.40, 11)),
-                        ProbHarvestAM = c(rep(0, 2), 0.40, 0.70, 0, rep(0.70, 16), rep(0.40, 4), 0, 0.70, 0.90, rep(0.70, 6), 0.60, 0.50, rep(0.60, 3)),
-                        ProbMovHunt   = c(rep(0, 5), 0.30, 0.70, rep(0.30, 5), rep(0.70, 5), rep(0.30, 2), rep(0.70, 4), rep(0.30, 2), 0, rep(0.70, 12), 0),
-                        Cells         = c(4, rep(9, 27), 4, rep(9, 10)),
-                        InitGroup     = c(rep(50, 7), 100, 200, 300, 400, 500, 100, 200, 300, 400, 500, 400, 500, 400, 500, 400, 500, 400, rep(500, 15)),
-                        HabitatProb   = c(rep("HC2", 4), rep("HC3", 13), rep("HC2", 8), rep('HC3', 14)),
-                        HuntPigglet   = c(rep('NA', 2), rep('Yes', 2), 'NA', rep('Yes', 24), rep('No', 10)),
-                        SurvivalP     = c(rep(0.60, 30), 0.70, 0.80, rep(0.90, 7)),
-                        MaleReset     = c(rep('Yes', 33), rep('No', 6)),
-                        FemaleProp    = c(rep("3-4", 36), "3-5", rep("3-6", 2)),
-                        GroupMoveHunt = c(rep("No", 38), "Yes"))
+Scenarios <- data.frame(Sc = c(1:40),
+                        ProbHarvest   = c(rep(0, 2), rep(0.40, 2), 0, rep(0.40, 20), 0, 0.70, 0.90, rep(0.40, 11),0),
+                        ProbHarvestAM = c(rep(0, 2), 0.40, 0.70, 0, rep(0.70, 16), rep(0.40, 4), 0, 0.70, 0.90, rep(0.70, 6), 0.60, 0.50, rep(0.60, 3),0),
+                        ProbMovHunt   = c(rep(0, 5), 0.30, 0.70, rep(0.30, 5), rep(0.70, 5), rep(0.30, 2), rep(0.70, 4), rep(0.30, 2), 0, rep(0.70, 12), 0,0),
+                        Cells         = c(4, rep(9, 27), 4, rep(9, 11)),
+                        InitGroup     = c(rep(50, 7), 100, 200, 300, 400, 500, 100, 200, 300, 400, 500, 400, 500, 400, 500, 400, 500, 400, rep(500, 16)),
+                        HabitatProb   = c(rep("HC2", 4), rep("HC3", 13), rep("HC2", 8), rep('HC3', 15)),
+                        HuntPigglet   = c(rep('NA', 2), rep('Yes', 2), 'NA', rep('Yes', 24), rep('No', 11)),
+                        SurvivalP     = c(rep(0.60, 30), 0.70, 0.80, rep(0.90, 8)),
+                        MaleReset     = c(rep('Yes', 33), rep('No', 7)),
+                        FemaleProp    = c(rep("3-4", 36), "3-5", rep("3-6", 3)),
+                        GroupMoveHunt = c(rep("No", 38), "Yes","Yes"))
 
 
 
@@ -1158,7 +1029,7 @@ Scenarios <- data.frame(Sc = c(1:39),
 
  # Scenarios$Sc
  
-for (i in 39) {
+for (i in 40) {
   
   HabitatProb = get(as.character(Scenarios[Scenarios$Sc == i,"HabitatProb"]))
 
